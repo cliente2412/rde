@@ -1,332 +1,79 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
-import { ArrowRight, PlusCircle, Trash2, Edit3, Download } from "lucide-react";
+// backend/server.js
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const { Low, JSONFile } = require('lowdb');
+const path = require('path');
 
-// DRE Dashboard - single-file React component
-// Dependencies: react, recharts, lucide-react, framer-motion (optional), tailwindcss
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-const STORAGE_KEY = "dre_data_v1";
+// DB setup (lowdb)
+const file = path.join(__dirname, 'db.json');
+const adapter = new JSONFile(file);
+const db = new Low(adapter);
 
-const COLORS = {
-  bg: "bg-gray-50",
-  panel: "bg-white",
-  primary: "text-slate-800",
-  accent: "text-indigo-600",
-  accentBg: "bg-indigo-600",
-  danger: "text-rose-600",
-};
+app.use(cors());
+app.use(bodyParser.json());
 
-const sampleData = [
-  { id: 1, date: "2025-01-01", type: "revenue", category: "Vendas", description: "Venda produto A", value: 250000 },
-  { id: 2, date: "2025-01-10", type: "expense", category: "Folha", description: "Salários janeiro", value: 80000 },
-  { id: 3, date: "2025-02-02", type: "revenue", category: "Serviços", description: "Consultoria B", value: 120000 },
-  { id: 4, date: "2025-02-15", type: "loss", category: "Quebra", description: "Perda estoque C", value: 15000 },
-  { id: 5, date: "2025-03-01", type: "expense", category: "Operacional", description: "Energia", value: 10000 },
-  { id: 6, date: "2025-03-10", type: "revenue", category: "Vendas", description: "Venda produto D", value: 200000 }
-];
-
-function formatCurrency(v) {
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+// initialize db if empty
+async function initDB() {
+  await db.read();
+  db.data = db.data || { transactions: [] };
+  await db.write();
 }
+initDB();
 
-export default function DREDashboard() {
-  const [transactions, setTransactions] = useState([]);
-  const [form, setForm] = useState({ date: "", type: "revenue", category: "", description: "", value: "" });
-  const [editingId, setEditingId] = useState(null);
-  const [filter, setFilter] = useState({ from: "2025-01-01", to: "2025-12-31" });
-
-  useEffect(() => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      try {
-        setTransactions(JSON.parse(raw));
-      } catch {
-        setTransactions(sampleData);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData));
-      }
-    } else {
-      setTransactions(sampleData);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData));
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(transactions));
-  }, [transactions]);
-
-  function resetForm() {
-    setForm({ date: "", type: "revenue", category: "", description: "", value: "" });
-    setEditingId(null);
+// Routes
+app.get('/api/transactions', async (req, res) => {
+  await db.read();
+  const { from, to } = req.query;
+  let tx = db.data.transactions || [];
+  if (from || to) {
+    tx = tx.filter(t => {
+      const d = new Date(t.date);
+      if (from && d < new Date(from)) return false;
+      if (to && d > new Date(to)) return false;
+      return true;
+    });
   }
+  res.json(tx.sort((a,b)=> new Date(b.date)-new Date(a.date)));
+});
 
-  function handleAddOrUpdate(e) {
-    e.preventDefault();
-    const val = Number(form.value);
-    if (!form.date || !form.category || !form.value || isNaN(val)) return;
-    if (editingId) {
-      setTransactions(t => t.map(item => item.id === editingId ? { ...item, ...form, value: val } : item));
-    } else {
-      const id = Date.now();
-      setTransactions(t => [{ id, ...form, value: val }, ...t]);
-    }
-    resetForm();
-  }
+app.post('/api/transactions', async (req, res) => {
+  const payload = req.body;
+  await db.read();
+  const id = Date.now();
+  const item = { id, ...payload };
+  db.data.transactions.push(item);
+  await db.write();
+  res.status(201).json(item);
+});
 
-  function handleEdit(id) {
-    const item = transactions.find(t => t.id === id);
-    if (!item) return;
-    setForm({ date: item.date, type: item.type, category: item.category, description: item.description, value: item.value });
-    setEditingId(id);
-  }
+app.put('/api/transactions/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  await db.read();
+  const idx = db.data.transactions.findIndex(t=>t.id===id);
+  if (idx === -1) return res.status(404).json({ error: 'Not found' });
+  db.data.transactions[idx] = { ...db.data.transactions[idx], ...req.body };
+  await db.write();
+  res.json(db.data.transactions[idx]);
+});
 
-  function handleDelete(id) {
-    if (!confirm("Remover lançamento?")) return;
-    setTransactions(t => t.filter(x => x.id !== id));
-  }
+app.delete('/api/transactions/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  await db.read();
+  db.data.transactions = db.data.transactions.filter(t=>t.id!==id);
+  await db.write();
+  res.status(204).end();
+});
 
-  const filtered = useMemo(() => {
-    const from = new Date(filter.from + "T00:00:00");
-    const to = new Date(filter.to + "T23:59:59");
-    return transactions.filter(t => {
-      const d = new Date(t.date + "T12:00:00");
-      return d >= from && d <= to;
-    }).sort((a,b)=> new Date(b.date)-new Date(a.date));
-  }, [transactions, filter]);
+// optional: endpoint to export all data
+app.get('/api/export', async (req, res) => {
+  await db.read();
+  res.json(db.data.transactions);
+});
 
-  // Aggregations for DRE
-  const totals = useMemo(() => {
-    const obj = { revenue: 0, expense: 0, loss: 0 };
-    for (const t of filtered) {
-      if (t.type === "revenue") obj.revenue += t.value;
-      if (t.type === "expense") obj.expense += t.value;
-      if (t.type === "loss") obj.loss += t.value;
-    }
-    obj.grossProfit = obj.revenue - obj.loss - obj.expense;
-    obj.operationalResult = obj.grossProfit; // placeholder for more detailed DRE
-    return obj;
-  }, [filtered]);
-
-  // Time series for charts (aggregate by month)
-  const series = useMemo(() => {
-    const map = {};
-    for (const t of filtered) {
-      const d = new Date(t.date + "T12:00:00");
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      if (!map[key]) map[key] = { month: key, revenue: 0, expense: 0, loss: 0 };
-      map[key][t.type] += t.value;
-    }
-    return Object.values(map).sort((a,b)=> a.month.localeCompare(b.month));
-  }, [filtered]);
-
-  // Pie for losses by category
-  const lossByCategory = useMemo(() => {
-    const m = {};
-    for (const t of filtered) {
-      if (t.type === "loss") m[t.category] = (m[t.category] || 0) + t.value;
-    }
-    return Object.entries(m).map(([name, value]) => ({ name, value }));
-  }, [filtered]);
-
-  function importJSON(ev) {
-    const file = ev.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const parsed = JSON.parse(e.target.result);
-        if (Array.isArray(parsed)) setTransactions(parsed);
-        else alert('JSON inválido: esperado array de lançamentos');
-      } catch (err) { alert('Erro ao ler JSON'); }
-    };
-    reader.readAsText(file);
-  }
-
-  function exportJSON() {
-    const blob = new Blob([JSON.stringify(transactions, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'dre_export.json'; a.click(); URL.revokeObjectURL(url);
-  }
-
-  return (
-    <div className={`min-h-screen p-6 ${COLORS.bg} text-slate-800`}>
-      <div className="max-w-7xl mx-auto grid grid-cols-12 gap-6">
-        <aside className="col-span-3 sticky top-6">
-          <div className={`rounded-2xl p-6 shadow ${COLORS.panel}`}>
-            <h2 className="text-xl font-semibold mb-2">DRE - Faturamento Empresarial</h2>
-            <p className="text-sm text-slate-500 mb-4">Painel de controle financeiro e DRE — entradas, saídas, perdas e gráficos.</p>
-
-            <div className="space-y-2">
-              <div>
-                <label className="block text-xs">Período (início)</label>
-                <input type="date" value={filter.from} onChange={e=>setFilter(f=>({...f, from: e.target.value}))} className="w-full mt-1 p-2 rounded-md border" />
-              </div>
-              <div>
-                <label className="block text-xs">Período (fim)</label>
-                <input type="date" value={filter.to} onChange={e=>setFilter(f=>({...f, to: e.target.value}))} className="w-full mt-1 p-2 rounded-md border" />
-              </div>
-            </div>
-
-            <div className="mt-4 flex gap-2">
-              <button onClick={exportJSON} className="flex-1 inline-flex items-center justify-center gap-2 py-2 px-3 rounded-md border">
-                <Download size={16}/> Exportar
-              </button>
-              <label className="inline-flex items-center gap-2 p-2 border rounded-md cursor-pointer">
-                <input type="file" accept="application/json" onChange={importJSON} className="hidden" />
-                <ArrowRight size={16}/> Importar
-              </label>
-            </div>
-
-            <div className="mt-6">
-              <h3 className="text-sm font-medium">Resumo</h3>
-              <div className="mt-2 grid grid-cols-1 gap-2">
-                <div className="p-3 rounded-md border">
-                  <div className="text-xs text-slate-500">Receita</div>
-                  <div className="text-lg font-semibold">{formatCurrency(totals.revenue)}</div>
-                </div>
-                <div className="p-3 rounded-md border">
-                  <div className="text-xs text-slate-500">Despesas</div>
-                  <div className="text-lg font-semibold">{formatCurrency(totals.expense)}</div>
-                </div>
-                <div className="p-3 rounded-md border">
-                  <div className="text-xs text-slate-500">Perdas</div>
-                  <div className="text-lg font-semibold text-rose-600">{formatCurrency(totals.loss)}</div>
-                </div>
-                <div className="p-3 rounded-md border bg-slate-100">
-                  <div className="text-xs text-slate-500">Resultado</div>
-                  <div className="text-lg font-semibold">{formatCurrency(totals.grossProfit)}</div>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </aside>
-
-        <main className="col-span-9 space-y-6">
-          <div className={`rounded-2xl p-6 shadow ${COLORS.panel}`}>
-            <h1 className="text-2xl font-bold">Painel DRE — Empresa (Grande)</h1>
-            <p className="text-sm text-slate-500 mt-1">Interface organizada para controle financeiro corporativo — pronta para integrar com backend real.</p>
-
-            <div className="mt-6 grid grid-cols-12 gap-4">
-              <div className="col-span-6">
-                <div className="p-4 rounded-lg border">
-                  <h3 className="font-semibold mb-2">Receita vs Despesa (mensal)</h3>
-                  <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={series}>
-                        <XAxis dataKey="month" />
-                        <YAxis />
-                        <Tooltip formatter={v=>formatCurrency(v)} />
-                        <Legend />
-                        <Line type="monotone" dataKey="revenue" stroke="#4f46e5" />
-                        <Line type="monotone" dataKey="expense" stroke="#ef4444" />
-                        <Line type="monotone" dataKey="loss" stroke="#f97316" />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-span-6">
-                <div className="p-4 rounded-lg border">
-                  <h3 className="font-semibold mb-2">Perdas por categoria</h3>
-                  <div className="h-56 flex items-center justify-center">
-                    {lossByCategory.length ? (
-                      <ResponsiveContainer width="100%" height={200}>
-                        <PieChart>
-                          <Pie dataKey="value" data={lossByCategory} label>
-                            {lossByCategory.map((entry, idx) => (
-                              <Cell key={`cell-${idx}`} fill={["#ef4444","#f97316","#a78bfa","#60a5fa"][idx % 4]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={v=>formatCurrency(v)} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    ) : <div className="text-sm text-slate-400">Sem perdas no período</div>}
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-span-12">
-                <div className="p-4 rounded-lg border">
-                  <h3 className="font-semibold mb-2">Fluxo de lançamentos</h3>
-                  <form onSubmit={handleAddOrUpdate} className="grid grid-cols-12 gap-2 items-end">
-                    <div className="col-span-2">
-                      <label className="text-xs">Data</label>
-                      <input type="date" value={form.date} onChange={e=>setForm(f=>({...f, date: e.target.value}))} className="w-full p-2 rounded-md border" />
-                    </div>
-                    <div className="col-span-2">
-                      <label className="text-xs">Tipo</label>
-                      <select value={form.type} onChange={e=>setForm(f=>({...f, type: e.target.value}))} className="w-full p-2 rounded-md border">
-                        <option value="revenue">Entrada (Receita)</option>
-                        <option value="expense">Saída (Despesa)</option>
-                        <option value="loss">Perda</option>
-                      </select>
-                    </div>
-                    <div className="col-span-3">
-                      <label className="text-xs">Categoria</label>
-                      <input value={form.category} onChange={e=>setForm(f=>({...f, category: e.target.value}))} className="w-full p-2 rounded-md border" placeholder="Ex: Vendas, Folha..." />
-                    </div>
-                    <div className="col-span-3">
-                      <label className="text-xs">Descrição</label>
-                      <input value={form.description} onChange={e=>setForm(f=>({...f, description: e.target.value}))} className="w-full p-2 rounded-md border" placeholder="Observação" />
-                    </div>
-                    <div className="col-span-2">
-                      <label className="text-xs">Valor (BRL)</label>
-                      <input value={form.value} onChange={e=>setForm(f=>({...f, value: e.target.value}))} className="w-full p-2 rounded-md border" placeholder="10000" />
-                    </div>
-
-                    <div className="col-span-12 flex gap-2 mt-2">
-                      <button type="submit" className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-indigo-600 text-white">
-                        <PlusCircle size={16} /> {editingId ? 'Atualizar' : 'Adicionar'}
-                      </button>
-                      {editingId && <button type="button" onClick={resetForm} className="px-4 py-2 rounded-md border">Cancelar</button>}
-                    </div>
-                  </form>
-
-                  <div className="mt-4 overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="text-slate-600">
-                        <tr>
-                          <th className="text-left p-2">Data</th>
-                          <th className="text-left p-2">Tipo</th>
-                          <th className="text-left p-2">Categoria</th>
-                          <th className="text-left p-2">Descrição</th>
-                          <th className="text-right p-2">Valor</th>
-                          <th className="p-2">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filtered.map(item => (
-                          <tr key={item.id} className="border-t">
-                            <td className="p-2 align-top">{item.date}</td>
-                            <td className="p-2 align-top">
-                              <span className={`px-2 py-1 rounded text-xs ${item.type==='revenue'?'bg-green-50 text-green-700': item.type==='expense'?'bg-red-50 text-red-700':'bg-orange-50 text-orange-700'}`}>{item.type}</span>
-                            </td>
-                            <td className="p-2 align-top">{item.category}</td>
-                            <td className="p-2 align-top">{item.description}</td>
-                            <td className="p-2 text-right align-top">{formatCurrency(item.value)}</td>
-                            <td className="p-2 text-center align-top">
-                              <div className="inline-flex gap-2">
-                                <button onClick={()=>handleEdit(item.id)} className="p-1 rounded border inline-flex items-center"><Edit3 size={14} /></button>
-                                <button onClick={()=>handleDelete(item.id)} className="p-1 rounded border inline-flex items-center"><Trash2 size={14} /></button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-        </main>
-
-      </div>
-    </div>
-  );
-}
+app.listen(PORT, () => {
+  console.log(`DRE backend running on http://localhost:${PORT}`);
+});
