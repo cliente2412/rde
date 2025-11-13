@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App de Ajuda para TDAH</title>
+    <style>
+        body {
+            background-color: #1c1c1c; /* Fundo preto */
+            color: #f1f1f1; /* Texto branco */
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            flex-direction: column;
+            text-align: center;
+        }
+
+        .container {
+            background-color: #ff6f00; /* Laranja */
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            color: #fff;
+        }
+
+        p {
+            font-size: 1.2em;
+            margin: 20px 0;
+        }
+
+        .button {
+            background-color: #ff4400; /* Cor do botão */
+            color: white;
+            font-size: 1.2em;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .button:hover {
+            background-color: #ff2a00; /* Cor do botão quando passa o mouse */
+        }
+
+        .button:focus {
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>App de Ajuda para TDAH</h1>
+        <p>Este aplicativo ajuda pessoas com TDAH a manter o foco e organização durante o trabalho ou estudo.</p>
+        <button class="button" id="alertButton">Ativar Alerta</button>
+        <p id="statusMessage"></p>
+    </div>
+
+    <audio id="alertSound" src="https://www.soundjay.com/button/beep-07.wav"></audio>
+
+    <script>
+        // Função para emitir um alerta sonoro
+        document.getElementById('alertButton').addEventListener('click', function() {
+            // Reproduzir som de alerta
+            var sound = document.getElementById('alertSound');
+            sound.play();
+
+            // Exibir uma mensagem de status
+            document.getElementById('statusMessage').innerText = "Alerta ativado! Foco é importante.";
+        });
+    </script>
+
+</body>
+</html>
